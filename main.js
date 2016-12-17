@@ -19,6 +19,11 @@ let obstacleShaderProgram
 let mouseTargetShaderProgram
 
 let boidBuffer
+let boidPositionsBuffer
+let boidVectorsBuffer
+let boidVertices
+let boidPositions
+let boidVectors
 let obstacleBuffer
 let obstacleNormalsBuffer
 let targetBuffer
@@ -37,7 +42,6 @@ let mouseDown = false
 let mouseUp = false
 
 const VIEW_Z = -12.0
-const Y_AXIS = vec3.fromValues(0.0, 1.0, 0.0)
 
 function compileShader (type, source) {
   const shader = gl.createShader(type)
@@ -67,7 +71,6 @@ function createShaderProgram (vert, frag) {
 
   shaderProgram.perspective = gl.getUniformLocation(shaderProgram, 'perspective')
   shaderProgram.view = gl.getUniformLocation(shaderProgram, 'view')
-  shaderProgram.model = gl.getUniformLocation(shaderProgram, 'model')
   shaderProgram.modelColor = gl.getUniformLocation(shaderProgram, 'modelColor')
 
   return shaderProgram
@@ -75,35 +78,73 @@ function createShaderProgram (vert, frag) {
 
 function initShaderPrograms () {
   boidShaderProgram = createShaderProgram(boidVert, boidFrag)
+  gl.bindAttribLocation(boidShaderProgram, 1, 'boidP')
+  boidShaderProgram.boidP = gl.getAttribLocation(boidShaderProgram, 'boidP')
+  gl.bindAttribLocation(boidShaderProgram, 2, 'boidV')
+  boidShaderProgram.boidV = gl.getAttribLocation(boidShaderProgram, 'boidV')
 
   obstacleShaderProgram = createShaderProgram(obstacleVert, obstacleFrag)
   gl.bindAttribLocation(obstacleShaderProgram, 1, 'vertNormal')
+  obstacleShaderProgram.model = gl.getUniformLocation(obstacleShaderProgram, 'model')
   obstacleShaderProgram.vertNormal = gl.getAttribLocation(obstacleShaderProgram, 'vertNormal')
   obstacleShaderProgram.lightPos = gl.getUniformLocation(obstacleShaderProgram, 'lightPos')
   obstacleShaderProgram.lightEnabled = gl.getUniformLocation(obstacleShaderProgram, 'lightEnabled')
   obstacleShaderProgram.lightScale = gl.getUniformLocation(obstacleShaderProgram, 'lightScale')
 
   mouseTargetShaderProgram = createShaderProgram(mouseTargetVert, mouseTargetFrag)
+  mouseTargetShaderProgram.model = gl.getUniformLocation(mouseTargetShaderProgram, 'model')
   mouseTargetShaderProgram.scale = gl.getUniformLocation(mouseTargetShaderProgram, 'scale')
 
   gl.enableVertexAttribArray(0)
 }
 
 function initBoidBuffers () {
+  boidVertices = new Float32Array(9 * flock.boids().length)
+  boidPositions = new Float32Array(9 * flock.boids().length)
+  boidVectors = new Float32Array(9 * flock.boids().length)
+
+  for (let boid of flock.boids()) {
+    boidVertices[boid.i * 9] = 0.0
+    boidVertices[boid.i * 9 + 1] = 0.04
+    boidVertices[boid.i * 9 + 2] = 0.0
+    boidVertices[boid.i * 9 + 3] = -0.1
+    boidVertices[boid.i * 9 + 4] = -0.04
+    boidVertices[boid.i * 9 + 5] = 0.0
+    boidVertices[boid.i * 9 + 6] = 0.1
+    boidVertices[boid.i * 9 + 7] = -0.04
+    boidVertices[boid.i * 9 + 9] = 0.0
+
+    for (let j = 0; j < 9; j += 3) {
+      boidPositions[boid.i * 9 + j] = boid.p[0]
+      boidPositions[boid.i * 9 + j + 1] = boid.p[1]
+      boidPositions[boid.i * 9 + j + 2] = boid.p[2]
+    }
+    for (let j = 0; j < 9; j += 3) {
+      boidVectors[boid.i * 9 + j] = boid.v[0]
+      boidVectors[boid.i * 9 + j + 1] = boid.v[1]
+      boidVectors[boid.i * 9 + j + 2] = boid.v[2]
+    }
+  }
+
   boidBuffer = gl.createBuffer()
   gl.bindBuffer(gl.ARRAY_BUFFER, boidBuffer)
-
-  const boidVertices = [
-    0.0, 0.04, 0.0,
-    -0.1, -0.04, 0.0,
-    0.1, -0.04, 0.0
-  ]
-
-  gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(boidVertices), gl.STATIC_DRAW)
+  gl.bufferData(gl.ARRAY_BUFFER, boidVertices, gl.STATIC_DRAW)
   boidBuffer.type = gl.TRIANGLES
   boidBuffer.itemSize = 3
-  boidBuffer.numItems = 3
+  boidBuffer.numItems = 3 * flock.boids().length
   boidBuffer.modelColor = vec4.fromValues(0.796078431372549, 0.29411764705882354, 0.08627450980392157, 1.0)
+
+  boidPositionsBuffer = gl.createBuffer()
+  gl.bindBuffer(gl.ARRAY_BUFFER, boidPositionsBuffer)
+  gl.bufferData(gl.ARRAY_BUFFER, boidPositions, gl.DYNAMIC_DRAW)
+  boidPositionsBuffer.itemSize = 3
+  boidPositionsBuffer.numItems = 3 * flock.boids().length
+
+  boidVectorsBuffer = gl.createBuffer()
+  gl.bindBuffer(gl.ARRAY_BUFFER, boidVectorsBuffer)
+  gl.bufferData(gl.ARRAY_BUFFER, boidVectors, gl.DYNAMIC_DRAW)
+  boidVectorsBuffer.itemSize = 3
+  boidVectorsBuffer.numItems = 3 * flock.boids().length
 }
 
 function initObstacleBuffers () {
@@ -269,23 +310,24 @@ function drawBoids () {
   gl.bindBuffer(gl.ARRAY_BUFFER, boidBuffer)
   gl.vertexAttribPointer(boidShaderProgram.vertPos, boidBuffer.itemSize, gl.FLOAT, false, 0, 0)
 
+  gl.enableVertexAttribArray(1)
+  gl.bindBuffer(gl.ARRAY_BUFFER, boidPositionsBuffer)
+  gl.bufferSubData(gl.ARRAY_BUFFER, 0, boidPositions)
+  gl.vertexAttribPointer(boidShaderProgram.boidP, boidPositionsBuffer.itemSize, gl.FLOAT, false, 0, 0)
+
+  gl.enableVertexAttribArray(2)
+  gl.bindBuffer(gl.ARRAY_BUFFER, boidVectorsBuffer)
+  gl.bufferSubData(gl.ARRAY_BUFFER, 0, boidVectors)
+  gl.vertexAttribPointer(boidShaderProgram.boidV, boidVectorsBuffer.itemSize, gl.FLOAT, false, 0, 0)
+
   gl.uniformMatrix4fv(boidShaderProgram.perspective, false, perspective)
   gl.uniformMatrix4fv(boidShaderProgram.view, false, view)
   gl.uniform4fv(boidShaderProgram.modelColor, boidBuffer.modelColor)
 
-  const axis = vec3.create()
+  gl.drawArrays(boidBuffer.type, 0, boidBuffer.numItems)
 
-  for (let boid of flock.boids()) {
-    mat4.identity(model)
-    mat4.translate(model, model, boid.p)
-
-    vec3.cross(axis, Y_AXIS, boid.v)
-    const cosine = vec3.dot(boid.v, Y_AXIS)
-    mat4.rotate(model, model, Math.acos(cosine), axis)
-    gl.uniformMatrix4fv(boidShaderProgram.model, false, model)
-
-    gl.drawArrays(boidBuffer.type, 0, boidBuffer.numItems)
-  }
+  gl.disableVertexAttribArray(1)
+  gl.disableVertexAttribArray(2)
 }
 
 function drawObstacles () {
@@ -355,6 +397,19 @@ function render () {
   }
 
   flock.update()
+  for (let boid of flock.boids()) {
+    for (let j = 0; j < 9; j += 3) {
+      boidPositions[boid.i * 9 + j] = boid.p[0]
+      boidPositions[boid.i * 9 + j + 1] = boid.p[1]
+      boidPositions[boid.i * 9 + j + 2] = boid.p[2]
+    }
+    for (let j = 0; j < 9; j += 3) {
+      boidVectors[boid.i * 9 + j] = boid.v[0]
+      boidVectors[boid.i * 9 + j + 1] = boid.v[1]
+      boidVectors[boid.i * 9 + j + 2] = boid.v[2]
+    }
+  }
+
   window.requestAnimationFrame(render)
 }
 
@@ -381,12 +436,12 @@ function render () {
   window.addEventListener('resize', resize)
   resize()
 
+  flock = Flock(canvas.width / canvas.height, numBoids, numObstacles)
+
   initShaderPrograms()
   initBoidBuffers()
   initObstacleBuffers()
   initTargetBuffer()
-
-  flock = Flock(canvas.width / canvas.height, numBoids, numObstacles)
 
   flock.linkMouseTarget(mouseCoord)
   canvas.onmousemove = mouseMoveHandler
