@@ -4,6 +4,7 @@ const vec3 = require('gl-vec3')
 module.exports = (aspectRatio, numBoids, numObstacles) => {
   const ZONE_INNER = 1.0
   const ZONE_OUTER = 2.0
+  const MAX_NEIGHBOURS_CHECK = 20
   const VISION_HALF_ANGLE = 160.0 * Math.PI / 180.0
   const VISION_HALF_ANGLE_RESTRICTED = 15.0 * Math.PI / 180.0
 
@@ -116,6 +117,10 @@ module.exports = (aspectRatio, numBoids, numObstacles) => {
             totalTooCloseP[1] += boids[i].p[1]
             totalTooCloseP[2] += boids[i].p[2]
           }
+        }
+
+        if (totalClose + totalTooClose > MAX_NEIGHBOURS_CHECK) {
+          break
         }
       }
     }
@@ -237,25 +242,24 @@ module.exports = (aspectRatio, numBoids, numObstacles) => {
       for (let boid of boids) {
         boid.visionA = VISION_HALF_ANGLE
         const target = vec3.create()
-        let priority = 1.0
+        let targetPriority = 1.0
 
         const obstacle = calcObstaclesTarget(boid)
         if (obstacle.inPerimeter) {
           vec3.scaleAndAdd(target, target, obstacle.target, WEIGHT_OBSTACLE)
-          // lower the priority of all other targets
-          priority = 0.1
-        }
+          targetPriority = 0.1
+        } else {
+          const neighbourTargets = calcNeighbourTargets(boid)
+          vec3.scaleAndAdd(target, target, neighbourTargets.cohesion, WEIGHT_COHESION)
+          vec3.scaleAndAdd(target, target, neighbourTargets.alignment, WEIGHT_ALIGNMENT)
+          vec3.scaleAndAdd(target, target, neighbourTargets.separation, WEIGHT_SEPARATION)
 
-        const neighbourTargets = calcNeighbourTargets(boid)
-        vec3.scaleAndAdd(target, target, neighbourTargets.cohesion, priority * WEIGHT_COHESION)
-        vec3.scaleAndAdd(target, target, neighbourTargets.alignment, priority * WEIGHT_ALIGNMENT)
-        vec3.scaleAndAdd(target, target, neighbourTargets.separation, priority * WEIGHT_SEPARATION)
+          vec3.scaleAndAdd(target, target, calcBoundaryTarget(boid), WEIGHT_BOUNDARY)
+        }
 
         if (mouseTarget.health) {
-          vec3.scaleAndAdd(target, target, calcMouseTarget(boid), priority * WEIGHT_MOUSE * mouseTarget.health)
+          vec3.scaleAndAdd(target, target, calcMouseTarget(boid), targetPriority * WEIGHT_MOUSE * mouseTarget.health)
         }
-
-        vec3.scaleAndAdd(target, target, calcBoundaryTarget(boid), priority * WEIGHT_BOUNDARY)
 
         vec3.add(boid.v, boid.v, target)
         vec3.normalize(boid.v, boid.v)
